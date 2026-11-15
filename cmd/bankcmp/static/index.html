@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>bankcmp · 跨库数据比对</title>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">BC</span>
+    <div>
+      <h1>bankcmp</h1>
+      <p>银行核心系统迁移 · 数据一致性验证</p>
+    </div>
+  </div>
+  <div class="topmeta">
+    <span id="health" class="pill">connecting…</span>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab" data-tab="connections" role="tab">① 连接配置</button>
+  <button class="tab" data-tab="tasks" role="tab">② 比对任务</button>
+  <button class="tab" data-tab="diffs" role="tab">③ 差异明细</button>
+  <button class="tab" data-tab="repairs" role="tab">④ 修复脚本</button>
+  <button class="tab" data-tab="report" role="tab">⑤ 比对报告</button>
+</nav>
+
+<main>
+  <!-- 连接配置 -->
+  <section id="panel-connections" class="panel">
+    <div class="split">
+      <div class="card">
+        <h2>新建 / 编辑连接</h2>
+        <form id="conn-form" autocomplete="off">
+          <input type="hidden" id="conn-id">
+          <label>名称 <input id="conn-name" required placeholder="老核心库 / 新核心库"></label>
+          <label>类型
+            <select id="conn-driver">
+              <option value="sqlite">SQLite</option>
+              <option value="postgres">PostgreSQL</option>
+            </select>
+          </label>
+          <label>DSN
+            <input id="conn-dsn" required placeholder="文件路径，或 postgres://user:pass@host:5432/db">
+          </label>
+          <label>默认字符集
+            <select id="conn-charset">
+              <option value="">UTF-8</option>
+              <option value="gbk">GBK</option>
+              <option value="gb18030">GB18030</option>
+              <option value="big5">Big5</option>
+            </select>
+          </label>
+          <label>备注 <input id="conn-note" placeholder="可选"></label>
+          <div class="row">
+            <button type="submit" class="primary">保存</button>
+            <button type="button" id="conn-test">测试连接</button>
+            <button type="button" id="conn-reset" class="ghost">清空</button>
+          </div>
+          <p id="conn-msg" class="msg"></p>
+        </form>
+      </div>
+      <div class="card">
+        <h2>已保存连接</h2>
+        <div id="conn-list" class="list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 比对任务 -->
+  <section id="panel-tasks" class="panel">
+    <div class="card">
+      <h2>新建比对任务</h2>
+      <form id="task-form" autocomplete="off">
+        <label>任务名称 <input id="task-name" required placeholder="上线前全量核对"></label>
+        <div class="grid2">
+          <label>源库 <select id="task-source"></select></label>
+          <label>目标库 <select id="task-target"></select></label>
+        </div>
+        <label>表配置（YAML）
+          <textarea id="task-config" rows="12" spellcheck="false"></textarea>
+        </label>
+        <details>
+          <summary>限速与性能选项</summary>
+          <div class="grid3">
+            <label>并发表数 <input id="opt-workers" type="number" min="1" value="2"></label>
+            <label>每表并发区间 <input id="opt-chunk-workers" type="number" min="1" value="4"></label>
+            <label>区间行数 <input id="opt-chunk-rows" type="number" min="100" value="20000"></label>
+            <label>源库行/秒（0=不限） <input id="opt-rps" type="number" min="0" value="0"></label>
+            <label>源库查询/秒（0=不限） <input id="opt-qps" type="number" min="0" value="0"></label>
+            <label>重查稳定期 ms <input id="opt-settle" type="number" min="0" value="300"></label>
+          </div>
+        </details>
+        <div class="row">
+          <button type="submit" class="primary">创建并启动</button>
+          <button type="button" id="task-dry" class="ghost">仅创建</button>
+          <button type="button" id="task-sample" class="ghost">填入示例配置</button>
+        </div>
+        <p id="task-msg" class="msg"></p>
+      </form>
+    </div>
+    <div class="card">
+      <h2>任务列表</h2>
+      <div id="task-list" class="list"></div>
+    </div>
+    <div id="task-detail" class="card hidden">
+      <div class="cardhead">
+        <h2 id="task-detail-title">任务详情</h2>
+        <button id="task-refresh" class="ghost">刷新</button>
+      </div>
+      <div id="task-summary" class="stats"></div>
+      <div class="tablewrap"><table id="table-runs"></table></div>
+      <h3>运行日志</h3>
+      <pre id="task-events" class="log"></pre>
+    </div>
+  </section>
+
+  <!-- 差异明细 -->
+  <section id="panel-diffs" class="panel">
+    <div class="card">
+      <div class="cardhead">
+        <h2>差异明细</h2>
+        <div class="row">
+          <select id="diff-task"></select>
+          <button id="diff-refresh" class="ghost">刷新</button>
+        </div>
+      </div>
+      <div class="filters">
+        <input id="diff-search" placeholder="按主键或内容搜索">
+        <select id="diff-table"><option value="">全部表</option></select>
+        <select id="diff-kind">
+          <option value="">全部类型</option>
+          <option value="missing">多出（源有目标无）</option>
+          <option value="extra">缺失（目标多出）</option>
+          <option value="modified">内容不同</option>
+        </select>
+        <select id="diff-stability">
+          <option value="">全部稳定性</option>
+          <option value="stable">稳定差异</option>
+          <option value="transient">比对期间变动</option>
+        </select>
+      </div>
+      <div id="diff-meta" class="msg"></div>
+      <div class="tablewrap"><table id="diff-table-view"></table></div>
+      <div class="row pager">
+        <button id="diff-prev" class="ghost">上一页</button>
+        <span id="diff-page"></span>
+        <button id="diff-next" class="ghost">下一页</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 修复脚本 -->
+  <section id="panel-repairs" class="panel">
+    <div class="card">
+      <h2>生成修复脚本</h2>
+      <form id="repair-form">
+        <div class="grid3">
+          <label>任务 <select id="repair-task"></select></label>
+          <label>表 <select id="repair-table"></select></label>
+          <label>差异类型
+            <select id="repair-kinds">
+              <option value="missing,extra,modified">全部</option>
+              <option value="missing">仅补缺失行</option>
+              <option value="extra">仅删多余行</option>
+              <option value="modified">仅修正内容</option>
+            </select>
+          </label>
+        </div>
+        <label class="check"><input type="checkbox" id="repair-transient"> 包含比对期间变动的行（默认排除）</label>
+        <div class="row">
+          <button type="submit" class="primary">预览 SQL</button>
+        </div>
+        <p class="msg">SQL 基于重新读取的完整行数据生成，不回放界面预览值。执行需二次确认。</p>
+      </form>
+      <div id="repair-preview" class="hidden">
+        <div class="cardhead">
+          <h3>预览</h3>
+          <span id="repair-count" class="pill"></span>
+        </div>
+        <pre id="repair-sql" class="sql"></pre>
+        <details>
+          <summary>回滚 SQL</summary>
+          <pre id="repair-undo" class="sql"></pre>
+        </details>
+        <div class="row">
+          <button id="repair-execute" class="danger">执行修复（需确认）</button>
+          <button id="repair-download" class="ghost">下载 .sql</button>
+        </div>
+        <p id="repair-msg" class="msg"></p>
+      </div>
+      <h3>历史批次</h3>
+      <div id="repair-list" class="list"></div>
+    </div>
+  </section>
+
+  <!-- 比对报告 -->
+  <section id="panel-report" class="panel">
+    <div class="card">
+      <div class="cardhead">
+        <h2>比对报告</h2>
+        <div class="row">
+          <select id="report-task"></select>
+          <button id="report-refresh" class="ghost">刷新</button>
+          <a id="report-csv" class="button ghost" href="#">导出 CSV</a>
+        </div>
+      </div>
+      <div id="report-summary" class="stats"></div>
+      <div class="tablewrap"><table id="report-table"></table></div>
+    </div>
+  </section>
+</main>
+
+<template id="tpl-empty"><p class="empty">暂无数据</p></template>
+<script src="/app.js"></script>
+</body>
+</html>

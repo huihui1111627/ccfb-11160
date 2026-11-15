@@ -16,3 +16,10 @@ node_modules/
 __pycache__/
 .venv/
 venv/
+
+# build output and generated test data
+/bin/
+/bankcmp.db*
+*.db
+*.db-wal
+*.db-shm
